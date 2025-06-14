@@ -19,15 +19,13 @@ pip install -r requirements.txt
 ```
 
 ## Usage
+Run the Application
 
 ```bash
-python url_health_checker.py [URL1] [URL2] ...
+python3 app.py
 ```
 
-Example:
-```bash
-python url_health_checker.py google.com example.com
-```
+Application can be accessed at: `localhost:5000`
 
 The output will show:
 - URL being checked
