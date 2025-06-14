@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>URL Health History</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.min.css" rel="stylesheet">
+    <style>
+        .status-code {
+            font-weight: bold;
+        }
+        .status-200 { color: #28a745; }
+        .status-error { color: #dc3545; }
+        .status-warning { color: #ffc107; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-light bg-light mb-4">
+        <div class="container">
+            <a class="navbar-brand" href="/">URL Health Checker</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">Check URLs</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/history">History</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container py-5">
+        <div class="row mb-4">
+            <div class="col">
+                <h1>URL Health History</h1>
+            </div>
+        </div>
+        
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <div class="form-group mb-3">
+                            <label for="urlSelect">Select URL:</label>
+                            <select class="form-control" id="urlSelect">
+                                <option value="">Select a URL</option>
+                                {% for url in urls %}
+                                <option value="{{ url }}" {% if url == selected_url %}selected{% endif %}>
+                                    {{ url }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="alert alert-info" role="alert">
+                            Select a URL from the dropdown to view its history
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="historyContent" style="display: none;">
+            <div class="row">
+                <div class="col-md-8">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title">Response Time History</h5>
+                            <div style="height: 400px;">
+                                <canvas id="responseTimeChart" style="height: 100%;"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-4">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title">Statistics</h5>
+                            <div id="stats"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row mt-4">
+                <div class="col">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title">Latest Check Results</h5>
+                            <div id="latestResults"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <script>
+        let responseTimeChart = null;
+
+        function updateResponseTimeChart(data) {
+            const ctx = document.getElementById('responseTimeChart').getContext('2d');
+            
+            // Clear canvas before drawing new chart
+            ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+            
+            const timestamps = data.map(item => new Date(item.timestamp).toLocaleString());
+            const responseTimes = data.map(item => item.response_time);
+            
+            // Destroy existing chart if it exists
+            if (responseTimeChart) {
+                responseTimeChart.destroy();
+            }
+            
+            // Create new chart
+            responseTimeChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: timestamps,
+                    datasets: [{
+                        label: 'Response Time (ms)',
+                        data: responseTimes,
+                        borderColor: 'rgb(75, 192, 192)',
+                        tension: 0.1,
+                        fill: false,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    layout: {
+                        padding: {
+                            left: 10,
+                            right: 10,
+                            top: 10,
+                            bottom: 10
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                stepSize: 100,
+                                callback: function(value) {
+                                    return value + 'ms';
+                                }
+                            },
+                            min: 0,
+                            max: Math.max(...responseTimes) + 100
+                        },
+                        x: {
+                            ticks: {
+                                autoSkip: true,
+                                maxTicksLimit: 10
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.dataset.label || '';
+                                    const value = context.parsed.y;
+                                    return `${label}: ${value}ms`;
+                                }
+                            }
+                        }
+                    }
+                },
+                // Add explicit height
+                height: 400
+            });
+            
+            // Force chart to update
+            responseTimeChart.update();
+        }
+
+        function displayStats(stats) {
+            const statsDiv = document.getElementById('stats');
+            if (statsDiv) {
+                statsDiv.innerHTML = `
+                    <div class="row">
+                        <div class="col-6">
+                            <p>Total Checks: ${stats.total_checks}</p>
+                            <p>Success Rate: ${stats.success_rate.toFixed(1)}%</p>
+                        </div>
+                        <div class="col-6">
+                            <p>Average Response Time: ${stats.avg_response_time.toFixed(2)} ms</p>
+                            <p>Last Check: ${new Date(stats.last_check.timestamp).toLocaleString()}</p>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function updateLatestResults(result) {
+            const resultsDiv = document.getElementById('latestResults');
+            if (resultsDiv) {
+                const statusClass = result.status_code >= 200 && result.status_code < 300 ? 'text-success' : 'text-danger';
+                resultsDiv.innerHTML = `
+                    <div class="mb-3">
+                        <p><strong>Latest Check:</strong></p>
+                        <p><strong>URL:</strong> ${result.full_url}</p>
+                        <p><strong>Status:</strong> <span class="${statusClass}">${result.status_code}</span></p>
+                        <p><strong>Response Time:</strong> ${result.response_time.toFixed(2)}ms</p>
+                        ${result.error_message ? `<p><strong>Error:</strong> ${result.error_message}</p>` : ''}
+                    </div>
+                `;
+            }
+        }
+
+        function updateCharts(url) {
+            if (!url) {
+                document.getElementById('historyContent').style.display = 'none';
+                return;
+            }
+            
+            document.getElementById('historyContent').style.display = 'block';
+            
+            // Show loading state
+            const statsDiv = document.getElementById('stats');
+            if (statsDiv) {
+                statsDiv.innerHTML = '<p>Loading statistics...</p>';
+            }
+            
+            const resultsDiv = document.getElementById('latestResults');
+            if (resultsDiv) {
+                resultsDiv.innerHTML = '<p>Loading latest results...</p>';
+            }
+            
+            // Fetch history data
+            fetch(`/api/history?url=${encodeURIComponent(url)}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+                    updateResponseTimeChart(data);
+                    if (data.length > 0) {
+                        updateLatestResults(data[0]);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching history:', error);
+                    if (resultsDiv) {
+                        resultsDiv.innerHTML = `<p class="text-danger">Error loading history data: ${error.message}</p>`;
+                    }
+                });
+
+            // Fetch stats
+            fetch(`/api/stats?url=${encodeURIComponent(url)}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+                    displayStats(data);
+                })
+                .catch(error => {
+                    console.error('Error fetching stats:', error);
+                    if (statsDiv) {
+                        statsDiv.innerHTML = `<p class="text-danger">Error loading statistics: ${error.message}</p>`;
+                    }
+                });
+        }
+
+        // Initialize URL select and charts when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            const select = document.getElementById('urlSelect');
+            if (select) {
+                const urlParam = new URLSearchParams(window.location.search).get('url');
+                
+                // Set up the onchange handler
+                select.onchange = function() {
+                    const url = this.value;
+                    updateCharts(url);
+                };
+                
+                // If we have a URL parameter, select it and update charts
+                if (urlParam) {
+                    select.value = urlParam;
+                    updateCharts(urlParam);
+                }
+            }
+        });
+    </script>
+</body>
+</html>

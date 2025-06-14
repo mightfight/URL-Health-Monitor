@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>URL Health Checker</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.min.css" rel="stylesheet">
+    <style>
+        .status-code {
+            font-weight: bold;
+        }
+        .status-200 { color: #28a745; }
+        .status-error { color: #dc3545; }
+        .status-warning { color: #ffc107; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-light bg-light mb-4">
+        <div class="container">
+            <a class="navbar-brand" href="/">URL Health Checker</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/">Check URLs</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/history">History</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container py-5">
+        
+        <div class="row">
+            <div class="col-12">
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <h5 class="card-title">Enter URLs</h5>
+                        <div class="mb-3">
+                            <textarea class="form-control" id="urlInput" rows="3" placeholder="Enter URLs (one per line)"></textarea>
+                        </div>
+                        <button class="btn btn-primary" onclick="checkUrls()">Check URLs</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Results</h5>
+                        <div id="results"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <script>
+        let responseTimeChart = null;
+        let selectedUrl = '';
+
+        function checkUrls() {
+            const urls = document.getElementById('urlInput').value
+                .split('\n')
+                .filter(url => url.trim())
+                .map(url => url.trim());
+
+            if (urls.length === 0) {
+                alert('Please enter at least one URL');
+                return;
+            }
+
+            fetch('/check', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ urls: urls })
+            })
+            .then(response => response.json())
+            .then(data => {
+                displayResults(data);
+                // Update URL select with new URLs
+                const select = document.getElementById('urlSelect');
+                data.forEach(result => {
+                    const option = document.createElement('option');
+                    option.value = result.base_url;
+                    option.textContent = result.base_url;
+                    select.appendChild(option);
+                });
+            })
+            .catch(error => console.error('Error:', error));
+        }
+
+        function viewHistory() {
+            const url = document.getElementById('urlSelect').value;
+            if (!url) {
+                alert('Please select a URL first');
+                return;
+            }
+            // First check if the URL exists in the database
+            fetch(`/api/history/${encodeURIComponent(url)}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('URL not found');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.length === 0) {
+                        throw new Error('No history data available for this URL');
+                    }
+                    window.location.href = `/history/${encodeURIComponent(url)}`;
+                })
+                .catch(error => {
+                    alert(error.message);
+                });
+        }
+
+        function displayResults(results) {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '<h6>Latest Results</h6>' + 
+                results.map(result => `
+                    <div class="card mb-2">
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-6">
+                                    <p class="mb-1">Base URL:</p>
+                                    <p class="mb-0">${result.base_url}</p>
+                                </div>
+                                <div class="col-6">
+                                    <p class="mb-1">Full URL:</p>
+                                    <p class="mb-0">${result.url}</p>
+                                </div>
+                                <div class="col-3">
+                                    <p class="mb-1">Status:</p>
+                                    <p class="mb-0 status-code ${result.status_code === 200 ? 'status-200' : 'status-error'}">
+                                        ${result.status_code}
+                                    </p>
+                                </div>
+                                <div class="col-3">
+                                    <p class="mb-1">Response Time:</p>
+                                    <p class="mb-0">${result.response_time.toFixed(2)} ms</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+        }
+
+        function updateCharts(url) {
+            if (!url) {
+                document.getElementById('chartContainer').style.display = 'none';
+                return;
+            }
+            
+            document.getElementById('chartContainer').style.display = 'block';
+            
+            fetch(`/history/${encodeURIComponent(url)}`)
+                .then(response => response.json())
+                .then(data => {
+                    updateResponseTimeChart(data);
+                    updateLatestStatus(data[0]);
+                });
+
+            fetch(`/stats/${encodeURIComponent(url)}`)
+                .then(response => response.json())
+                .then(data => {
+                    displayStats(data);
+                });
+        }
+
+        function updateLatestStatus(data) {
+            if (!data) return;
+            
+            const urlSpan = document.getElementById('latestUrl');
+            const statusSpan = document.getElementById('latestStatus');
+            const responseTimeSpan = document.getElementById('latestResponseTime');
+            const checkTimeSpan = document.getElementById('latestCheckTime');
+            
+            urlSpan.textContent = data.base_url;
+            statusSpan.innerHTML = `<span class="status-code ${data.status_code === 200 ? 'status-200' : 'status-error'}">${data.status_code}</span>`;
+            responseTimeSpan.textContent = `${data.response_time.toFixed(2)} ms`;
+            checkTimeSpan.textContent = new Date(data.timestamp).toLocaleString();
+        }
+
+        function populateUrlSelect() {
+            fetch('/stats')
+                .then(response => response.json())
+                .then(urls => {
+                    const select = document.getElementById('urlSelect');
+                    urls.forEach(url => {
+                        const option = document.createElement('option');
+                        option.value = url;
+                        option.textContent = url;
+                        select.appendChild(option);
+                    });
+                });
+        }
+
+        // Initialize URL select when page loads
+        document.addEventListener('DOMContentLoaded', populateUrlSelect);
+
+        function updateResponseTimeChart(data) {
+            const ctx = document.getElementById('responseTimeChart').getContext('2d');
+            
+            if (responseTimeChart) {
+                responseTimeChart.destroy();
+            }
+
+            responseTimeChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.map(d => {
+                        const date = new Date(d.timestamp);
+                        return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+                    }),
+                    datasets: [{
+                        label: 'Response Time (ms)',
+                        data: data.map(d => d.response_time),
+                        borderColor: 'rgb(75, 192, 192)',
+                        tension: 0.1,
+                        fill: false,
+                        pointRadius: 4,
+                        pointHoverRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                stepSize: 100,
+                                callback: function(value) {
+                                    return value + 'ms';
+                                }
+                            }
+                        },
+                        x: {
+                            ticks: {
+                                autoSkip: true,
+                                maxTicksLimit: 10
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.dataset.label || '';
+                                    const value = context.parsed.y;
+                                    return `${label}: ${value}ms`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function displayStats(stats) {
+            const statsDiv = document.getElementById('stats');
+            statsDiv.innerHTML = `
+                <div class="row">
+                    <div class="col-6">
+                        <p>Total Checks: ${stats.total_checks}</p>
+                        <p>Success Rate: ${stats.success_rate.toFixed(1)}%</p>
+                    </div>
+                    <div class="col-6">
+                        <p>Average Response Time: ${stats.avg_response_time.toFixed(2)} ms</p>
+                        <p>Last Check: ${new Date(stats.last_check.timestamp).toLocaleString()}</p>
+                    </div>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>
